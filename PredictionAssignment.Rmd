@@ -1,0 +1,122 @@
+---
+title: "Practical Machine Learning - Prediction Assignment"
+author: "Bill Cruise"
+date: "Sunday, January 18, 2015"
+output: html_document
+---
+
+#### Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, our goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. Our goal is to predict the manner in which they did the exercise.
+
+#### Loading and Cleaning the Data
+
+We can load both the training and testing data sets from the provided CSV files.
+
+```{r load-libraries, echo=FALSE, message=FALSE, warning=FALSE}
+library(lattice)
+library(ggplot2)
+library(caret)
+library(rpart)
+library(rattle)
+library(randomForest)
+```
+
+```{r load-data}
+pml.training <- read.csv("pml-training.csv", na.strings=c("", "NA", "#DIV/0!"))
+pml.testing <- read.csv("pml-testing.csv")
+```
+
+The training data set consists of 19,622 observations of 160 variables. The final test data set consists of only 20 observations of 160 variables. We'll set those aside until end.
+
+Some of the columns in the `pml.training` data set have no predictive value (e.g., `user_name` and various timestamps), and many columns contain only `NA`. We'll need to remove these columns before proceeding.
+
+```{r clean-data}
+removeCols <- apply(pml.training, 2, function(x) { sum(is.na(x)) })
+clean.training <- pml.training[, which(removeCols == 0)]
+clean.testing <- pml.testing[, which(removeCols == 0)]
+
+removeCols <- c(1, 2, 3, 4, 5, 6, 7)
+clean.training <- clean.training[-removeCols]
+clean.testing <- clean.testing[-removeCols]
+```
+
+#### Create Training and Test Sets
+
+We can split the original training data into training and testing data sets.
+
+```{r split-data-set}
+inTrain <- createDataPartition(y=clean.training$classe, p=0.7, list=FALSE)
+training <- clean.training[inTrain,]
+testing <- clean.training[-inTrain,]
+dim(training); dim(testing)
+```
+
+#### Decision Tree Model
+
+The first model we'll try is a decision tree model using the `caret` package `train` function. We'll use the `rpart` classification method.
+
+```{r train-decision-tree, cache=TRUE}
+modFit <- train(classe ~ ., method="rpart", data=training)
+print(modFit$finalModel)
+```
+
+The `finalModel` tells us which features to use to classify a new observation, and what threshhold values are used in the classification. We can use the `fancyRpartPlot` function from the `rattle` package to generate an easy to read flow chart.
+
+```{r plot-decision-tree}
+fancyRpartPlot(modFit$finalModel)
+```
+
+This model uses the `roll_belt`, `pitch_forearm`, `roll_forearm`, and `magnet_dumbbell` features to try and classify an observation.
+
+##### Error Rates
+
+We can use the `predict` and `confusionMatrix` functions to find out how accurate our model is at classifying observations from both the training set and the test set.
+
+```{r decision-tree-error-rates}
+# check prediction error rate on training data set
+pred.train <- predict(modFit, newdata=training)
+confusionMatrix(pred.train, training$classe)
+
+# check prediction error rate on testing data set
+pred.test <- predict(modFit, newdata=testing)
+confusionMatrix(pred.test, testing$classe)
+```
+
+##### Analysis
+
+We can see that the accuracy of predictions using this model will only be around 50%. Even considering that randomly guessing one of five classes will give you an expected accuracy of 20%, this is still not very good. This model is only good at identifying a couple of the classes from the data, and fails to ever recognize class D. We'll try another model to see if we can do better.
+
+#### Random Forest
+
+We can train a random forest model using the `randomForest` function and package in just a few lines of R code.
+
+```{r random-forest, cache=TRUE}
+cv.control = trainControl(method = "cv", number = 2)
+cv <- train(classe ~ ., data = training, method = "rf", trControl = cv.control)
+rf <- randomForest(classe ~ ., data = training, mtry = cv$bestTune$mtry)
+```
+
+##### Error Rates
+
+Once again, we can use the `predict` and `confusionMatrix` functions to see how accurate predictions using this new model will be.
+
+```{r random-forest-error-rates}
+predict.train <- predict(rf)
+confusionMatrix(predict.train, training$classe)
+
+predict.test <- predict(rf, newdata = testing)
+confusionMatrix(predict.test, testing$classe)
+```
+
+##### Analysis
+
+We can see that predictions using this model will be better than 99% accurate. This is a far better result than the previous model, so it is a clear choice when making classifications for new observations.
+
+#### Final Results
+
+When the random forest model was used to classify the 20 observations in the prediction assignment portion of this project, 20 out of 20 observations were classified correctly.
+
+#### References:
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. [Qualitative Activity Recognition of Weight Lifting Exercises](http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201). Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
